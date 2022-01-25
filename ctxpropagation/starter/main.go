@@ -6,7 +6,7 @@ import (
 
 	"github.com/pborman/uuid"
 	"go.temporal.io/sdk/client"
-	"go.temporal.io/sdk/contrib/opentracing"
+	"go.temporal.io/sdk/contrib/opentelemetry"
 	"go.temporal.io/sdk/interceptor"
 	"go.temporal.io/sdk/workflow"
 
@@ -15,11 +15,10 @@ import (
 
 func main() {
 	// Set tracer which will be returned by opentracing.GlobalTracer().
-	closer := ctxpropagation.SetJaegerGlobalTracer()
-	defer func() { _ = closer.Close() }()
+	defer ctxpropagation.InitTracer("starter")()
 
 	// Create interceptor
-	tracingInterceptor, err := opentracing.NewInterceptor(opentracing.TracerOptions{})
+	tracingInterceptor, err := opentelemetry.NewTracingInterceptor(opentelemetry.TracerOptions{})
 	if err != nil {
 		log.Fatalf("Failed creating interceptor: %v", err)
 	}

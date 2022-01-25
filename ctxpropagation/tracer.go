@@ -1,31 +1,41 @@
 package ctxpropagation
 
 import (
-	"io"
+	"context"
+	"log"
+	"time"
 
-	"github.com/opentracing/opentracing-go"
-	"github.com/uber/jaeger-client-go"
-	"github.com/uber/jaeger-client-go/config"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/resource"
+	"go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
 )
 
-func SetJaegerGlobalTracer() io.Closer {
-	cfg := config.Configuration{
-		ServiceName: "ctx-propogation-sample",
-		Sampler: &config.SamplerConfig{
-			Type:  jaeger.SamplerTypeConst,
-			Param: 1,
-		},
-		Reporter: &config.ReporterConfig{
-			LogSpans: true,
-		},
-	}
-	tracer, closer, err := cfg.NewTracer(
-		config.Logger(jaeger.StdLogger),
-	)
+func InitTracer(serviceName string) func() {
+	exporter, err := stdouttrace.New(stdouttrace.WithPrettyPrint())
 	if err != nil {
-		panic(err)
+		log.Printf("Problem configuring trace exporter, tracing disabled: %v", err)
+		exporter = nil
 	}
-	opentracing.SetGlobalTracer(tracer)
+	// Configure the OTel tracer provider.
+	provider := trace.NewTracerProvider(
+		trace.WithSampler(trace.AlwaysSample()),
+		trace.WithBatcher(exporter, trace.WithBatchTimeout(500*time.Millisecond)),
+		trace.WithResource(resource.NewWithAttributes(semconv.SchemaURL, semconv.ServiceNameKey.String(serviceName))),
+	)
+	otel.SetTracerProvider(provider)
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
 
-	return closer
+	// This callback will ensure all spans get flushed before the program exits.
+	return func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		err := provider.Shutdown(ctx)
+		if err != nil {
+			// do better here?
+			log.Printf("ERROR: %s\n", err.Error())
+		}
+	}
 }
